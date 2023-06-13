@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from typing import Optional
+import difflib
+from sklearn.feature_extraction.text import TfidfVectorizer 
+from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 import numpy as np
 
@@ -12,6 +15,7 @@ df = pd.read_csv('PeliculasCreditos2.csv', parse_dates=['release_date'])
 def get_cantidad_filmaciones_mes(mes: str):
     cantidad = cantidad_filmaciones_mes(mes)
     return {"cantidad": cantidad}
+
 def cantidad_filmaciones_mes(mes: str):
     # Mapeo de nombres de meses en español a inglés
     meses_espanol = {
@@ -153,6 +157,44 @@ def get_director(df, nombre_director):
     peliculas_director = director[['title', 'release_date', 'return', 'budget','revenue']]
 
     return exito_director, peliculas_director
+
+@app.get("/recomendar_pelicula/{movie_name}")
+def recomendar_pelicula(movie_name: str):
+    lista_de_todas_las_peliculas = peliculas['title'].tolist()
+    find_close_match = difflib.get_close_matches(movie_name, lista_de_todas_las_peliculas)
+    close_match = find_close_match[0]
+    index_of_the_movie = peliculas[peliculas['title'] == close_match]['ID'].values[0]
+    similarity_score = list(enumerate(similarity[index_of_the_movie]))
+    sorted_similar_movies = sorted(similarity_score, key=lambda x: x[1], reverse=True)
+    recommended_movies = []
+    i = 1
+    for movie_name in sorted_similar_movies:
+        index = movie_name[0]
+        matching_rows = peliculas[peliculas.ID == index]
+        if len(matching_rows) > 0:
+            title_from_index = matching_rows['title'].values[0]
+            recommended_movies.append(title_from_index)
+            if i >= 5:
+                break
+            i += 1
+    return {"recommended_movies": recommended_movies}
+
+peliculas = pd.read_csv('PeliculasCreditos2.csv')
+peliculas['ID'] = range(1, len(peliculas) + 1)
+
+peliculas = peliculas.replace(',', '', regex=True)
+
+selected_features = ['genres', 'tagline', 'cast', 'Director']
+
+for feature in selected_features:
+    peliculas[feature] = peliculas[feature].fillna('')
+
+peliculas_combinadas = peliculas[selected_features].apply(lambda row: ' '.join(row.astype(str)), axis=1)
+
+vectorizer = TfidfVectorizer()
+feature_vectors = vectorizer.fit_transform(peliculas_combinadas)
+
+similarity = cosine_similarity(feature_vectors[:2500, :])
 
 if __name__ == "__main__":
     import uvicorn
